@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>小冰28预测系统 V2</title>
+
+<script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
+
+<style>
+body{
+    margin:0;
+    background:#f2f3f5;
+    font-family:-apple-system,BlinkMacSystemFont;
+}
+
+/* ===== 顶部 ===== */
+.header{
+    background:linear-gradient(90deg,#0aa5a5,#11698b);
+    color:#fff;
+    text-align:center;
+    padding:14px;
+    font-weight:bold;
+    font-size:18px;
+}
+
+/* ===== tab ===== */
+.tabs{display:flex;background:#fff}
+.tab{
+    flex:1;text-align:center;padding:10px;font-size:14px
+}
+.tab.active{
+    background:#1f9aa7;color:#fff
+}
+
+/* ===== 页面 ===== */
+.page{display:none}
+.page.active{display:block}
+
+/* ===== 表格 ===== */
+table{
+    width:100%;
+    border-collapse:collapse;
+    background:#fff;
+}
+td,th{
+    padding:6px;
+    border-bottom:1px solid #eee;
+    font-size:12px;
+    text-align:center;
+}
+
+/* 标签 */
+.tag{
+    padding:2px 6px;
+    border-radius:4px;
+    color:#fff;
+    font-size:11px;
+}
+.big{background:#ff4d4f}
+.small{background:#1f9aa7}
+.single{background:#888}
+.double{background:#0aa5a5}
+
+.hit{color:#19c37d;font-weight:bold}
+.miss{color:#ff4d4f;font-weight:bold}
+
+/* 预测卡片 */
+.card{
+    background:#fff;
+    margin:10px;
+    padding:10px;
+    border-radius:10px;
+    box-shadow:0 2px 6px rgba(0,0,0,.05);
+}
+
+.btn{
+    width:100%;
+    background:#1f9aa7;
+    color:#fff;
+    border:none;
+    padding:10px;
+    border-radius:8px;
+    font-size:14px;
+}
+</style>
+</head>
+
+<body>
+
+<div class="header">小冰28预测 · 冰核四象算法版</div>
+
+<div class="tabs">
+<div class="tab active" data="result">结果</div>
+<div class="tab" data="trend">走势</div>
+<div class="tab" data="stats">统计</div>
+<div class="tab" data="predict">预测</div>
+</div>
+
+<div id="result" class="page active"><table id="resultT"></table></div>
+<div id="trend" class="page"><table id="trendT"></table></div>
+<div id="stats" class="page"><table id="statsT"></table></div>
+
+<div id="predict" class="page">
+<div class="card">
+<button class="btn" id="runPredict">一键预测（冰核V9.1）</button>
+<div style="margin-top:8px;font-size:15px">
+今日杀组：<b id="killTxt">--</b>
+&nbsp;&nbsp; 胜率：<b id="rateTxt">--</b>
+</div>
+</div>
+<table id="backtestT"></table>
+</div>
+
+<script>
+const API="https://pc28.help";
+let list=[];
+
+const types=["大双","大单","小双","小单"];
+
+function combo(sum){
+    return (sum>=14?"大":"小")+(sum%2?"单":"双");
+}
+
+$(".tab").click(function(){
+    $(".tab").removeClass("active");
+    $(this).addClass("active");
+    $(".page").removeClass("active");
+    $("#"+$(this).attr("data")).addClass("active");
+});
+
+/* ===== 获取数据 ===== */
+async function load(){
+    let r=await fetch(API+"/kj.json?limit=120");
+    let j=await r.json();
+    list=j.data.map(x=>({q:x.qihao,sum:+x.sum,t:combo(+x.sum)}));
+    renderAll();
+}
+
+/* ===== 渲染 ===== */
+function renderAll(){
+    renderResult();
+    renderTrend();
+    renderStats();
+}
+
+/* 结果 */
+function renderResult(){
+    let h="<tr><th>期号</th><th>和值</th><th>形态</th></tr>";
+    list.slice(0,30).forEach(d=>{
+        h+=`<tr><td>${d.q}</td><td>${d.sum}</td><td>${d.t}</td></tr>`;
+    });
+    $("#resultT").html(h);
+}
+
+/* 走势 */
+function renderTrend(){
+    let h="<tr><th>期号</th><th>大</th><th>小</th><th>单</th><th>双</th></tr>";
+    list.slice(0,30).forEach(d=>{
+        h+=`<tr>
+        <td>${d.q}</td>
+        <td>${d.t.includes("大")?"●":""}</td>
+        <td>${d.t.includes("小")?"●":""}</td>
+        <td>${d.t.includes("单")?"●":""}</td>
+        <td>${d.t.includes("双")?"●":""}</td>
+        </tr>`;
+    });
+    $("#trendT").html(h);
+}
+
+/* 统计 */
+function renderStats(){
+    let c={大:0,小:0,单:0,双:0};
+    list.forEach(d=>{
+        if(d.t[0]=="大")c.大++;else c.小++;
+        if(d.t[1]=="单")c.单++;else c.双++;
+    });
+    $("#statsT").html(`
+    <tr><td>大</td><td>${c.大}</td></tr>
+    <tr><td>小</td><td>${c.小}</td></tr>
+    <tr><td>单</td><td>${c.单}</td></tr>
+    <tr><td>双</td><td>${c.双}</td></tr>
+    `);
+}
+
+/* ================= 冰核四象算法核心 ================= */
+function runAlgorithm(data){
+
+    let score={大双:0,大单:0,小双:0,小单:0};
+
+    function vote(type){
+        score[type]++;
+    }
+
+    /* 维度1 频率 */
+    let last50=data.slice(0,50);
+    let count={};
+    types.forEach(t=>count[t]=0);
+    last50.forEach(d=>count[d.t]++);
+    let dev=types.map(t=>Math.abs(count[t]/50-0.25));
+    let max=Math.max(...dev);
+    let idx=dev.indexOf(max);
+    vote(types[idx]);
+
+    /* 维度2 趋势 */
+    let last20=data.slice(0,20);
+    let c20={},c50={};
+    types.forEach(t=>{c20[t]=0;c50[t]=0});
+    last20.forEach(d=>c20[d.t]++);
+    last50.forEach(d=>c50[d.t]++);
+    let ratio=types.map(t=>c20[t]/(c50[t]||1));
+    vote(types[ratio.indexOf(Math.min(...ratio))]);
+
+    /* 维度3 连出 */
+    for(let i=0;i<8;i++){
+        if(data[i].t==data[i+1].t && data[i].t==data[i+2].t){
+            vote(data[i].t);
+            break;
+        }
+    }
+
+    /* 维度4 遗漏 */
+    let miss={};
+    types.forEach(t=>miss[t]=0);
+    types.forEach(t=>{
+        for(let i=0;i<data.length;i++){
+            if(data[i].t==t)break;
+            miss[t]++;
+        }
+    });
+    vote(types[Object.values(miss).indexOf(Math.max(...Object.values(miss)))]);
+
+    /* 维度5 马尔可夫 */
+    let prev=data[1].t;
+    let trans={};
+    types.forEach(t=>trans[t]=0);
+    for(let i=1;i<data.length-1;i++)
+        if(data[i].t==prev) trans[data[i-1].t]++;
+    vote(types[Object.values(trans).indexOf(Math.min(...Object.values(trans)))]);
+
+    /* 维度6 周期 */
+    let cycCount={};
+    types.forEach(t=>cycCount[t]=0);
+    [7,14,28,50].forEach(p=>{
+        let seg=data.slice(0,p);
+        types.forEach(t=>{
+            let c=seg.filter(x=>x.t==t).length;
+            if(c<p/4)cycCount[t]++;
+        });
+    });
+    vote(types[Object.values(cycCount).indexOf(Math.max(...Object.values(cycCount)))]);
+
+    /* 最少票 = 杀组 */
+    let min=Math.min(...Object.values(score));
+    return types.find(t=>score[t]==min);
+}
+
+/* ===== 回测 ===== */
+function backtest(){
+    let win=0,total=20;
+    let html="<tr><th>期号</th><th>预测杀</th><th>实际</th><th>结果</th></tr>";
+
+    for(let i=20;i>0;i--){
+        let slice=list.slice(i);
+        let kill=runAlgorithm(slice);
+        let real=list[i-1].t;
+        let ok=kill!==real;
+        if(ok)win++;
+
+        html+=`<tr>
+        <td>${list[i-1].q}</td>
+        <td>${kill}</td>
+        <td>${real}</td>
+        <td class="${ok?'hit':'miss'}">${ok?'✓':'✗'}</td>
+        </tr>`;
+    }
+
+    $("#backtestT").html(html);
+    $("#rateTxt").text((win/total*100).toFixed(1)+"%");
+}
+
+/* 按钮 */
+$("#runPredict").click(()=>{
+    let kill=runAlgorithm(list);
+    $("#killTxt").text(kill);
+    backtest();
+});
+
+load();
+</script>
+</body>
+</html>
